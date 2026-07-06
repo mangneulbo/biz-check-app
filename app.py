@@ -4,8 +4,8 @@ import json
 import pandas as pd
 from datetime import datetime
 
-# [수정] 7번째 줄: 마케터님의 요청대로 직관적인 관리를 위해 상단 변수로 고정합니다. + 보안키로 변경함
-API_KEY = st.secrets["d751b84b1cddd360058fb9998209b7811509a33157139039547109ea9f494067"]
+# [수정] 7번째 줄: 마케터님의 요청대로 직관적인 관리를 위해 상단 변수로 고정합니다.# 보안키 연동
+API_KEY = st.secrets["API_KEY"]
 
 # 대시보드 환경 설정
 st.set_page_config(page_title="사업자등록 상태 조회기 PRO", page_icon="📈", layout="wide")
