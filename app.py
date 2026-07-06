@@ -2,22 +2,22 @@ import streamlit as st
 import requests
 import json
 import pandas as pd
+import time
 from datetime import datetime
 
-# [보안 규칙] 스트림릿 금고(Secrets)에서 인증키를 완벽하게 연동합니다.
+# [보안 규칙] 스트림릿 금고(Secrets)에서 마케터님의 단일 인증키를 안전하게 읽어옵니다.
 API_KEY = st.secrets["API_KEY"]
 
-# 대시보드 환경 설정
-st.set_page_config(page_title="사업자등록 상태 대량 조회기 PRO", page_icon="📊", layout="wide")
-st.title("📊 기업 파트너 상태 대량 검증 대시보드")
-st.markdown("여러 개의 사업자번호를 줄바꿈으로 입력하여 한 번에 실시간 상태 조회가 가능합니다. (최대 100개)")
+st.set_page_config(page_title="사업자번호 휴/폐업여부 판별", page_icon="📊", layout="wide")
+st.title("📊휴/폐업 사업자 검증 대시보드 (Single Key 5,000건+)")
+st.markdown("100개 이상의 사업자번호를 조회할 경우 시간이 소요될 수 있습니다.")
 st.write("---")
 
 if "search_history" not in st.session_state:
     st.session_state["search_history"] = []
 
-# 대량 조회용 국세청 API 연동 함수 (HTTP 상태 코드 반환 추가)
-def fetch_bulk_business_status(biz_numbers, api_key):
+# 국세청 단일 청크(100개) 전송 함수 (단일 인증키 고정 사용)
+def fetch_chunk_status(biz_numbers, api_key):
     url = "https://api.odcloud.kr/api/nts-businessman/v1/status"
     params = {"serviceKey": api_key}
     payload = json.dumps({"b_no": biz_numbers})
@@ -26,109 +26,89 @@ def fetch_bulk_business_status(biz_numbers, api_key):
     try:
         response = requests.post(url, params=params, headers=headers, data=payload)
         return response.status_code, response.json() if response.status_code == 200 else None
-    except Exception as e:
+    except:
         return 500, None
 
-# UI 레이아웃 분할
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("📥 대량 번호 입력")
-    
+    st.subheader("📥 사업자번호 입력")
     raw_input = st.text_area(
-        "사업자등록번호를 줄바꿈(Enter)으로 입력해 주세요. (최대 100개)",
-        height=250,
-        placeholder="123-45-67890\n9876543210"
+        "엑셀이나 메모장에서 몇 천 개의 사업자번호를 값복사하여 그대로 붙여넣으세요. (줄바꿈 필수)",
+        height=350,
+        placeholder="123-45-67890\n9876543210\n..."
     )
     
-    if st.button("🚀 한 번에 조회하기", type="primary"):
+    if st.button("🚀 사업자번호 조회 시작", type="primary"):
         lines = raw_input.split('\n')
         
-        processed_nos = []     # 공백/하이픈 제거 후 정상 10자리 번호
-        too_long_nos = []      # 10자리를 초과한 잘못된 번호
-        invalid_format_nos = [] # 10자리 미만이거나 숫자가 아닌 번호
-        
+        # 데이터 정제 파이프라인: 하이픈/공백 제거 후 정상 10자리 숫자만 필터링 (잘못된 형식은 자동 Skip)
+        processed_nos = []
         for line in lines:
-            original_line = line.strip()
-            if not original_line:
-                continue
-                
-            # 하이픈과 공백을 무조건 제거하여 탈락 처리 후 순수 숫자만 추출
-            clean_no = original_line.replace("-", "").replace(" ", "")
-            
-            if len(clean_no) > 10:
-                too_long_nos.append(original_line)
-            elif len(clean_no) == 10 and clean_no.isdigit():
+            clean_no = line.replace("-", "").replace(" ", "").strip()
+            if len(clean_no) == 10 and clean_no.isdigit():
                 processed_nos.append(clean_no)
-            else:
-                invalid_format_nos.append(original_line)
         
-        # ❌ 유효성 검사 1단계: 숫자가 10개가 넘는 데이터가 하나라도 있을 때 (마케터님 요청 규격)
-        if too_long_nos:
-            st.error("⚠️ 사업자번호는 10자리의 숫자로 이루어져 있습니다.")
-            st.markdown("**글자 수가 초과된 입력값:**")
-            for num in too_long_nos:
-                st.markdown(f"- ❌ `{num}` (10자리 초과)")
-                
-        # ❌ 유효성 검사 2단계: 10자리 미만이거나 형식이 안 맞을 때
-        elif invalid_format_nos and not processed_nos:
-            st.error("⚠️ 입력된 번호들의 형식을 확인해 주세요. (10자리 미만 또는 문자 포함)")
-            
-        elif not processed_nos:
-            st.error("⚠️ 입력된 사업자등록번호가 없습니다.")
-            
-        elif len(processed_nos) > 100:
-            st.error(f"⚠️ 한 번에 최대 100개까지만 조회 가능합니다. (현재 입력: {len(processed_nos)}개)")
-            
+        total_count = len(processed_nos)
+        
+        if total_count == 0:
+            st.error("⚠️ 입력된 데이터 중 유효한 사업자등록번호(10자리)가 없습니다.")
+        elif not API_KEY:
+            st.error("⚠️ 스트림릿 Secrets 설정에 API_KEY가 등록되지 않았습니다.")
         else:
-            # 🟢 모든 검증 통과 시 국세청 API 호출
-            with st.spinner(f"국세청에서 {len(processed_nos)}개 기업 데이터를 실시간 확인 중..."):
-                status_code, result = fetch_bulk_business_status(processed_nos, API_KEY)
+            # 🟢 [핵심 알고리즘] 100개씩 쪼개서 연속으로 요청을 날리는 루프 실행
+            chunk_size = 100
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 실시간 진행 상황을 보여줄 빈 모니터 생성
+            status_monitor = st.empty()
+            
+            for i in range(0, total_count, chunk_size):
+                # 5000개 중 현재 윈도우(예: 0~100번째, 100~200번째...)를 칼같이 슬라이싱
+                chunk = processed_nos[i:i + chunk_size]
                 
-                # 🛑 [핵심 개발] API 데이터 열람 한도 초과 및 서버 에러 발생 시 처리
+                status_monitor.info(f"⏳ 전체 {total_count}건 중 {i}번째 항목부터 {min(i + chunk_size, total_count)}건째 처리 중...")
+                
+                # 국세청 API 호출
+                status_code, result = fetch_chunk_status(chunk, API_KEY)
+                
+                # 🛑 일일 할당량 한도(Quota) 초과 또는 국세청 서버 에러 발생 시 처리
                 if status_code != 200 or not result or "data" not in result:
-                    # 요청한 배열의 첫 번째 번호를 에러 메시지에 바인딩
-                    failed_start_no = processed_nos[0]
+                    failed_start_no = chunk[0]
                     formatted_failed_no = f"{failed_start_no[:3]}-{failed_start_no[3:5]}-{failed_start_no[5:]}"
                     
-                    # 마케터님이 요청하신 정확한 알럿 문구 출력
                     st.error(f"❌ [ '{formatted_failed_no}'부터 할당량 초과로 검증에 실패했습니다. ]")
-                    st.info("ℹ️ 공공데이터포털의 일일 호출 한도(Quota)를 초과했거나 국세청 서버의 일시적 제안이 발생했습니다.")
+                    st.warning(f"⚠️ 일일 할당량이 소진되어 {i}번째까지만 조회된 데이터가 우측 이력에 안전하게 저장되었습니다.")
+                    break # 조회를 중단하고 직전까지 성공한 소중한 수천 건의 데이터를 화면에 지킵니다.
                 
-                else:
-                    # 📊 정상 응답 처리 및 이력 적재
-                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    success_count = 0
+                # 결과 가공 및 실시간 표 적재
+                for info in result["data"]:
+                    biz_no = info.get("b_no", "")
+                    status_code_str = info.get("b_stt_cd", "")
+                    status_text = info.get("b_stt", "미등록 사업자")
+                    tax_type = info.get("tax_type", "등록되지 않은 번호")
                     
-                    for info in result["data"]:
-                        biz_no = info.get("b_no", "")
-                        status_code_str = info.get("b_stt_cd", "")
-                        status_text = info.get("b_stt", "")
-                        tax_type = info.get("tax_type", "등록되지 않은 번호")
+                    end_dt = info.get('end_dt', '')
+                    if end_dt and status_code_str == "03":
+                        status_text += f" (폐업일: {end_dt})"
                         
-                        if not status_text:
-                            status_text = "미등록 사업자"
-                            status_code_str = "99"
-                        else:
-                            success_count += 1
-                        
-                        end_dt = info.get('end_dt', '')
-                        if end_dt and status_code_str == "03":
-                            status_text += f" (폐업일: {end_dt})"
-                            
-                        history_entry = {
-                            "조회시간": current_time,
-                            "사업자번호": f"{biz_no[:3]}-{biz_no[3:5]}-{biz_no[5:]}",
-                            "상태": status_text,
-                            "과세유형": tax_type
-                        }
-                        
-                        st.session_state["search_history"].insert(0, history_entry)
-                    
-                    st.success(f"✅ 총 {len(processed_nos)}개 기업 조회 완료 (성공: {success_count}개)")
+                    history_entry = {
+                        "조회시간": current_time,
+                        "사업자번호": f"{biz_no[:3]}-{biz_no[3:5]}-{biz_no[5:]}",
+                        "상태": status_text,
+                        "과세유형": tax_type
+                    }
+                    st.session_state["search_history"].insert(0, history_entry)
+                
+                # 국세청 서버 부하 방지 및 안정적인 조회를 위한 미세 딜레이 (0.2초)
+                time.sleep(0.2)
+                
+            # 모든 루프가 에러 없이 끝나면 성공 메시지 출력
+            if status_code == 200 and result:
+                status_monitor.success(f"🎉 총 {total_count}개 사업자번호 검증이 완료됐습니다!")
 
 with col2:
-    st.subheader("📊 실시간 대량 조회 결과 및 이력 관리")
+    st.subheader("📊사업자번호 휴/폐업 조회 결과 및 이력 관리")
     if st.session_state["search_history"]:
         df = pd.DataFrame(st.session_state["search_history"])
         st.dataframe(df, use_container_width=True)
@@ -141,4 +121,4 @@ with col2:
             mime="text/csv"
         )
     else:
-        st.info("조회된 이력이 없습니다. 왼쪽 입력창에 번호들을 넣고 대량 조회를 시작하세요.")
+        st.info("왼쪽 입력창에 사업자등록번호를 넣고 [휴/폐업 조회 시작] 버튼을 누르세요.")
