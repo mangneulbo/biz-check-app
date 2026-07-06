@@ -9,8 +9,8 @@ from datetime import datetime
 API_KEY = st.secrets["API_KEY"]
 
 st.set_page_config(page_title="사업자번호 휴/폐업여부 판별", page_icon="📊", layout="wide")
-st.title("📊휴/폐업 사업자 검증 대시보드 (Single Key 5,000건+)")
-st.markdown("100개 이상의 사업자번호를 조회할 경우 시간이 소요될 수 있습니다.")
+st.title("📊휴/폐업 사업자 검증 대시보드")
+st.markdown("대량의 사업자번호를 조회할 경우 시간이 소요될 수 있습니다.")
 st.write("---")
 
 if "search_history" not in st.session_state:
@@ -34,7 +34,7 @@ col1, col2 = st.columns([1, 2])
 with col1:
     st.subheader("📥 사업자번호 입력")
     raw_input = st.text_area(
-        "엑셀이나 메모장에서 몇 천 개의 사업자번호를 값복사하여 그대로 붙여넣으세요. (줄바꿈 필수)",
+        "엑셀이나 메모장에서 사업자번호를 값복사하여 붙여넣으세요. (줄바꿈 필수)",
         height=350,
         placeholder="123-45-67890\n9876543210\n..."
     )
