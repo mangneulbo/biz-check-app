@@ -3,6 +3,7 @@ import requests
 import json
 import pandas as pd
 import time
+from io import BytesIO
 from datetime import datetime
 
 # [보안 규칙] 스트림릿 금고(Secrets)에서 마케터님의 단일 인증키를 안전하게 읽어옵니다.
@@ -28,6 +29,25 @@ def fetch_chunk_status(biz_numbers, api_key):
         return response.status_code, response.json() if response.status_code == 200 else None
     except:
         return 500, None
+
+
+# 🟢 [신규] DataFrame을 엑셀(xlsx) 바이트로 변환하는 헬퍼 함수
+def convert_df_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="조회이력")
+
+        # 보기 좋게 컬럼 너비 자동 조정
+        worksheet = writer.sheets["조회이력"]
+        for col_idx, col_name in enumerate(df.columns, start=1):
+            max_len = max(
+                df[col_name].astype(str).map(len).max() if not df.empty else 0,
+                len(str(col_name))
+            ) + 2
+            worksheet.column_dimensions[worksheet.cell(row=1, column=col_idx).column_letter].width = max_len
+
+    return output.getvalue()
+
 
 col1, col2 = st.columns([1, 2])
 
@@ -113,12 +133,29 @@ with col2:
         df = pd.DataFrame(st.session_state["search_history"])
         st.dataframe(df, use_container_width=True)
         
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 전체 조회 이력 다운로드 (CSV)",
-            data=csv,
-            file_name=f"bulk_biz_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # 🟢 [신규] CSV / 엑셀 다운로드 버튼을 나란히 배치
+        dl_col1, dl_col2 = st.columns(2)
+
+        with dl_col1:
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 CSV로 다운로드",
+                data=csv,
+                file_name=f"bulk_biz_report_{timestamp}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        with dl_col2:
+            excel_data = convert_df_to_excel(df)
+            st.download_button(
+                label="📊 엑셀(xlsx)로 다운로드",
+                data=excel_data,
+                file_name=f"bulk_biz_report_{timestamp}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
     else:
         st.info("왼쪽 입력창에 사업자등록번호를 넣고 [휴/폐업 조회 시작] 버튼을 누르세요.")
